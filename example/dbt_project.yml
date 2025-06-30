@@ -1,0 +1,9 @@
+vars:
+  load_info_config:
+    default:
+      table: "dbt_load_info"
+      schema: "dbt_etl"
+    dev_clickhouse:
+      table: "dbt_load_info"
+      schema: "default"        
+

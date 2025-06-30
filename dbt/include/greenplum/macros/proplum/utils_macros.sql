@@ -71,40 +71,6 @@
     {% endif %}
 {% endmacro %}
 
-{% macro greenplum__proplum_filter_add(sql,delta_field,object_name,safety_period,load_interval) %}
-        {# Get extraction range from load_info table #}
-        {% set load_info_table = proplum_get_load_info_table_name() %}
-        {% set extraction_range_sql %}
-            SELECT extraction_from, extraction_to, delta_field
-            FROM {{ load_info_table }} 
-            WHERE invocation_id = '{{ invocation_id }}' 
-            AND object_name = '{{ object_name }}'
-            AND status = 1
-            LIMIT 1
-        {% endset %}
-        
-        {% set extraction_range = run_query(extraction_range_sql) %}
-        {% if extraction_range and extraction_range.rows %}
-            {% set extraction_from = extraction_range.rows[0][0] %}
-            {% set extraction_to = extraction_range.rows[0][1] %}
-            {%- set modified_sql -%}
-                SELECT * FROM (
-                {{ sql }}
-                ) as main_sql
-                WHERE 1=1  AND {{ delta_field }} BETWEEN '{{ extraction_from }}'::timestamp AND '{{ extraction_to }}'::timestamp
-            {%- endset -%}            
-        {% else %}
-            {% set dates = proplum_get_extraction_dates(model_target=object_name, safety_period=safety_period, load_interval=load_interval, delta_field=delta_field,load_method='filter_delta',flag_commit=true, log_data=true) %}
-            {%- set modified_sql -%}
-                SELECT * FROM (
-                {{ sql }}
-                ) as main_sql
-                WHERE 1=1  AND {{ delta_field }} BETWEEN '{{ dates.extraction_from }}'::timestamp AND '{{ dates.extraction_to }}'::timestamp
-            {%- endset -%}  
-        {% endif %}
-        {{ return(modified_sql) }}
-{% endmacro %}
-
 {% macro greenplum__proplum_create_temp_relation(base_relation,prefix='bkp_') %}
     {% set backup_name = prefix ~ base_relation.identifier %}
     {% set staging_schema = 'stg_' ~ base_relation.schema %}
@@ -532,12 +498,31 @@
     {% endif %}     
 {% endmacro %}
 
-{% macro greenplum__proplum_update_load_info_complete(target_relation, delta_relation=none, load_type=none, row_cnt=none) %}
-    {# Updates or inserts into the dbt_load_info table with execution details #}
+{% macro greenplum__proplum_update_load_info_complete(target_relation, delta_relation,load_type=none,row_cnt=none ) %}
+    {# Updates the dbt_load_info table with execution details #}
     
     {% set model_sql = model.get('compiled_code', '') %}
     {% set delta_field = config.get('delta_field', none) %}
     {% set load_info_table = proplum_get_load_info_table_name() %}
+    {% if delta_field %}
+        UPDATE {{ load_info_table }} SET 
+            status = 2,
+            extraction_to = (SELECT MAX({{ delta_field }}) FROM {{ delta_relation }}),
+            updated_at = current_timestamp,
+            load_type='{{load_type}}',
+            row_cnt={{row_cnt}},
+            model_sql = '{{ model_sql | replace("'", "''") }}'
+        WHERE 
+            invocation_id = '{{ invocation_id }}' 
+            AND object_name = '{{ target_relation.name }}';
+    {% endif %}    
+{% endmacro %}
+
+{% macro greenplum__proplum_log_full_load(target_relation) %}
+    {# Logs extraction dates to dbt_load_info with upsert logic #}
+    {% set model_sql = model.get('compiled_code', '') %}
+    {% set load_info_table = proplum_get_load_info_table_name() %}
+    {% set delta_field = config.get('delta_field', none) %}
     
     {# First check if record exists #}
     {% set check_exists_sql %}
@@ -549,35 +534,24 @@
     
     {% set record_exists = run_query(check_exists_sql).rows|length > 0 %}
     
-    {# Determine extraction_to value based on delta_relation and delta_field #}
-    {% set extraction_to_sql %}
-        {% if delta_relation is not none and delta_field is not none %}
-            (SELECT MAX({{ delta_field }}) FROM {{ delta_relation }})
-        {% elif delta_field is not none %}
-            (SELECT MAX({{ delta_field }}) FROM {{ target_relation }})
-        {% else %}
-            NULL
-        {% endif %}
-    {% endset %}
-    
-    {# Determine row count if not provided #}
-    {% set row_count = row_cnt if row_cnt is not none else '(SELECT count(*) FROM ' ~ target_relation ~ ')' %}
-    {% set load_type_value = load_type if load_type is not none else 'init' %}
-    
     {% if record_exists %}
         {# Update existing record #}
         {% call statement('update_extraction') %}
             UPDATE {{ load_info_table }} SET
                 status = 2,
-                extraction_to = {{ extraction_to_sql }},
+                extraction_to = {% if delta_field is not none %}
+                    (SELECT MAX({{ delta_field }}) FROM {{ target_relation }})
+                {% else %}
+                    NULL
+                {% endif %},
                 updated_at = current_timestamp,
-                load_type = '{{ load_type_value }}',
+                load_type = 'init',
+                extraction_from = NULL,
                 delta_field = '{{ delta_field }}',
                 model_sql = '{{ model_sql | replace("'", "''") }}',
-                row_cnt = {{ row_count }}
-            WHERE 
-                object_name = '{{ target_relation.name }}'
-                AND invocation_id = '{{ invocation_id }}'
+                row_cnt = (SELECT count(*) FROM {{ target_relation }})
+            WHERE object_name = '{{ target_relation.name }}'
+            AND invocation_id = '{{ invocation_id }}'
         {% endcall %}
     {% else %}
         {# Insert new record #}
@@ -596,14 +570,18 @@
             ) VALUES (
                 '{{ target_relation.name }}',
                 2,
-                {{ extraction_to_sql }},
+                {% if delta_field is not none %}
+                    (SELECT MAX({{ delta_field }}) FROM {{ target_relation }})
+                {% else %}
+                    NULL
+                {% endif %},
                 '{{ invocation_id }}',
-                '{{ load_type_value }}',
+                'init',
                 current_timestamp,
                 current_timestamp,
                 '{{ delta_field }}',
                 '{{ model_sql | replace("'", "''") }}',
-                {{ row_count }}
+                (SELECT count(*) FROM {{ target_relation }})
             )
         {% endcall %}
     {% endif %}

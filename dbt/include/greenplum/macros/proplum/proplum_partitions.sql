@@ -5,7 +5,7 @@
     2. Loads data in partition intervals
     3. Switches partitions into target table
     #}
-    
+    {% set lock_id = greenplum__proplum_generate_lock(target_relation) %}
 
     {% set storage_param = greenplum__proplum_get_table_attributes(target_relation) %}
     {% set dist_key = greenplum__proplum_get_distribution_key(target_relation.schema + '.' + target_relation.identifier) %}
@@ -126,14 +126,26 @@
         
         -- Analyze table if configured
         {% set analyze_table = config.get('analyze', true) %}
-        {% if analyze_table %}
-            {% set analyze_table_sql %}
-                {{greenplum__proplum_analyze_table_macro(target_relation, analyze_table)}}
-            {% endset %}
-            {% do run_query(analyze_table_sql) %}
-        {% endif %}    
+        {{greenplum__proplum_analyze_table_macro(target_relation, analyze_table)}}
 
     {% endif %}
 
-    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'partitions',row_cnt) }}
+    {% set delta_field = config.get('delta_field', none) %}
+    {% set model_sql = model.get('compiled_code', '') %}
+    {% if delta_field %}
+        {% set load_info_table = proplum_get_load_info_table_name() %}
+        {% set run_id = invocation_id %}
+        UPDATE {{ load_info_table }} SET 
+            status = 2,
+            extraction_to=( select MAX({{ delta_field }}) from {{ delta_relation }} ),
+            updated_at=current_timestamp,
+            row_cnt={{row_cnt}},
+            load_type='proplum_partitions',
+            model_sql='{{ model_sql | replace("'", "''")}}'
+        where 
+            invocation_id = '{{ run_id }}' 
+            AND object_name = '{{ target_relation.name }}';
+    {% endif %}
+
+    select 1;
 {% endmacro %}

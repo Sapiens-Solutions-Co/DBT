@@ -1,4 +1,6 @@
 {% macro greenplum__proplum_delta_merge(target_relation, delta_relation) %}
+    {% set lock_id = greenplum__proplum_generate_lock(target_relation) %}
+    
     {% do log("Creating delta table for " ~ target_relation) %}  
     
     -- Create temporary buffer table
@@ -52,5 +54,5 @@
     {{greenplum__proplum_analyze_table_macro(target_relation, analyze_table)}}
 
     -- Update load info
-    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'delta_merge',row_cnt) }}
+    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'proplum_delta_merge',row_cnt) }}
 {% endmacro %}

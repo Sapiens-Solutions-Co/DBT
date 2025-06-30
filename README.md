@@ -897,13 +897,6 @@ CREATE READABLE EXTERNAL TABLE <<model name>>
 ```
 ### New incremental strategies
 
-| Feature               | [FULL](#full) | [DELTA UPSERT](#delta-upsert)  | [PARTITIONS](#partitions) |
-|-----------------------|---------------|--------------------------------|----------------------------------------|
-| **Short algoritm**    | Exchange table with table with new data | Delete overlap data, insert new data |  Switсh partitions with combined of new and existing data or just new data |
-| **Best For**          | Small reference tables | Dimension tables with updates  | Partitioned fact tables |
-| **Requires**          | - | `merge_keys`, `delta_field` | Partitioned table, `delta_field` |
-| **Parameters**        | - | `merge_keys`, `delta_field`, `delete duplicates` | Partitioned table, `delta_field`, `merge_partitions`, `merge_keys` |
-
 #### FULL
 
 <details>
@@ -979,7 +972,7 @@ This method is used for delta load into the model while preserving already loade
 
 Parameters:
 1) Set incremental_strategy to 'delta_upsert' and materialized='proplum' to select this loading method.
-2) merge_keys: The unique key of the table. Values inside key columns should not have null values.
+2) merge_keys: The unique key of the table.
 3) delete_duplicates: A flag indicating whether to remove duplicate keys in the data taken from the source. Default is false. When removing duplicates, the record with the latest value in delta_field is kept.
 4) delta_field: The field in the target model on which the delta condition is applied.  
 5) For delta load with time-based incremental loading, the proplum_filter_delta(source_column, log_dates=false) macro must be added after the WHERE condition in the written SELECT statement (if no WHERE restriction is needed, put 1=1 for proplum_filter_delta to work). This macro adds a delta constraint on dates to the WHERE condition. Source_column is set to the field that will be used as the delta field in the source, and log_dates = true. The latter parameter ensures that the delta period calculation occurs not at the time of the source model's work but at the time of the target model's launch. If the model parameters include safety_period and load_interval, the same date shifting logic is used for delta calculation as for external tables ([Enhanced for delta load format](#enhanced-for-delta-load-format)).

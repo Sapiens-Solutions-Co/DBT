@@ -4,6 +4,8 @@
     1. Creates date partitions if needed
     2. Loads data into appropriate partitions
     #}
+    {% set lock_id = greenplum__proplum_generate_lock(target_relation) %}
+        
     -- Check number of rows in source data
     {% set check_sql %}
         SELECT COUNT(*) FROM {{ delta_relation }}
@@ -18,7 +20,7 @@
             -- Get partition key (assuming date/timestamp partitioning)
         {% set partition_key = greenplum__proplum_get_partition_key(target_relation) %}
         {% if not partition_key %}
-            {{ exceptions.raise_compiler_error("Partition key not specified for DELTA strategy") }}
+            {{ exceptions.raise_compiler_error("Partition key not specified for PARTITIONED_DELTA strategy") }}
         {% endif %}
         -- Get date range from temp table
         {% set date_range_sql %}
@@ -48,5 +50,5 @@
     {% endif %}
 
     -- Update load info
-    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'delta',row_cnt) }}
+    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'proplum_delta',row_cnt) }}
 {% endmacro %}

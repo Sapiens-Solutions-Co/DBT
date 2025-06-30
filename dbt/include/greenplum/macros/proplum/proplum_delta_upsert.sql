@@ -3,7 +3,10 @@
     UPSERT strategy implementation:
     1. Deletes matching records from target
     2. Inserts new records from source
-    #}    
+    #}
+
+    {% set lock_id = greenplum__proplum_generate_lock(target_relation) %}
+    
     {% set table_exists = adapter.get_relation(target_relation.database, target_relation.schema, target_relation.name) %}
     {% do log("Creating delta table: " ~ backup_relation) %}
 
@@ -53,6 +56,6 @@
         {{greenplum__proplum_analyze_table_macro(target_relation, analyze_table)}}
     {% endif %}
     -- Update load info
-    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'delta_upsert',row_cnt) }}
+    {{ greenplum__proplum_update_load_info_complete(target_relation, delta_relation,'proplum_delta_upsert',row_cnt) }}
 {% endmacro %}
 

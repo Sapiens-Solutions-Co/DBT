@@ -36,44 +36,6 @@
     {% endif %}
 {% endmacro %}
 
-{% macro clickhouse__proplum_filter_add(sql,delta_field,object_name,safety_period,load_interval) %}
-    {# Get extraction range from load_info table #}
-    {% set load_info_table = proplum_get_load_info_table_name() %}
-    {% set extraction_range_sql %}
-        SELECT extraction_from, extraction_to, delta_field
-        FROM {{ load_info_table }} 
-        WHERE invocation_id = '{{ invocation_id }}' 
-        AND object_name = '{{ object_name }}'
-        AND status = 1
-        LIMIT 1
-    {% endset %}
-    {% set extraction_range = run_query(extraction_range_sql) %}
-    {% if extraction_range and extraction_range.rows %}
-        {% set extraction_from = extraction_range.rows[0][0] %}
-        {% set extraction_to = extraction_range.rows[0][1] %}
-        {%- set modified_sql -%}
-            SELECT * FROM (
-            {{ sql }}
-            ) as main_sql
-            WHERE 1=1  
-            AND {{ delta_field }} BETWEEN timestamp('{{ extraction_from }}')
-            AND timestamp('{{ extraction_to }}')
-        {%- endset -%}
-    {% else %}
-        {% set dates = proplum_get_extraction_dates(model_target=object_name, safety_period=safety_period, load_interval=load_interval, delta_field=source_column,load_method='filter_delta',flag_commit=true, log_data=true) %}
-        {%- set modified_sql -%}
-            SELECT * FROM (
-            {{ sql }}
-            ) as main_sql
-            WHERE 1=1  
-            AND {{ delta_field }} BETWEEN timestamp('{{ dates.extraction_from }}') 
-            AND timestamp('{{ dates.extraction_to }}')
-        {%- endset -%}        
-    {% endif %}
-    {{ return(modified_sql) }}
-{% endmacro %}
-
-
 {% macro clickhouse__proplum_log_extraction_dates(model_target, extraction_from, extraction_to,load_method,extraction_type,delta_field) %}
     {# Logs extraction dates to dbt_load_info #}
     {% set load_info_table = proplum_get_load_info_table_name() %}

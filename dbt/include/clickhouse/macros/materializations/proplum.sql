@@ -4,12 +4,6 @@
   {%- set target_relation = this.incorporate(type='table') -%}
 
   {%- set unique_key = config.get('unique_key') -%}
-  {% set merge_keys = config.get('merge_keys') %}
-  {% set delta_field = config.get('delta_field') %}
-  {% set partition_by = config.get('partition_by') %}   
-  {% set safety_period = config.get('safety_period', default='0 days') %}
-  {% set load_interval = config.get('load_interval', default='') %}    
-  {% set add_delta = config.get('add_delta', default=True) %}
   {% if unique_key is not none and unique_key|length == 0 %}
     {% set unique_key = none %}
   {% endif %}
@@ -21,13 +15,6 @@
   {%- set full_refresh_mode = (should_full_refresh() or existing_relation.is_view) -%}
   {%- set on_schema_change = incremental_validate_on_schema_change(config.get('on_schema_change'), default='ignore') -%}
 
-  {% if delta_field and existing_relation and not full_refresh_mode and add_delta %}
-    {% set modified_sql = clickhouse__proplum_filter_add(sql,delta_field,this.name,safety_period,load_interval) %}
-    {% do model.update({'compiled_code': modified_sql}) %}
-  {% else %}
-    {% set modified_sql = sql %}
-  {% endif %}  
-
   {%- set intermediate_relation = make_intermediate_relation(target_relation)-%}
   {%- set backup_relation_type = 'table' if existing_relation is none else existing_relation.type -%}
   {%- set backup_relation = make_backup_relation(target_relation, backup_relation_type) -%}
@@ -38,7 +25,9 @@
   {{ drop_relation_if_exists(preexisting_backup_relation) }}
 
   {% set incremental_strategy = config.get('incremental_strategy') or 'default'  %}
-
+  {% set merge_keys = config.get('merge_keys') %}
+  {% set delta_field = config.get('delta_field') %}
+  {% set partition_by = config.get('partition_by') %} 
   {{ clickhouse__proplum_validate_strategy(incremental_strategy, merge_keys, delta_field, partition_by) }}
 
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
@@ -47,13 +36,13 @@
   {% if existing_relation is none %}
     -- No existing table, simply create a new one
     {% call statement('main') %}
-        {{ get_create_table_as_sql(False, target_relation, modified_sql) }}
+        {{ get_create_table_as_sql(False, target_relation, sql) }}
     {% endcall %}
     {% set need_log = true %} 
   {% elif full_refresh_mode %}
     -- Completely replacing the old table, so create a temporary table and then swap it
     {% call statement('main') %}
-        {{ get_create_table_as_sql(False, intermediate_relation, modified_sql) }}
+        {{ get_create_table_as_sql(False, intermediate_relation, sql) }}
     {% endcall %}
     {% set need_swap = true %}
     {% set need_log = true %}
@@ -62,7 +51,7 @@
         + '__dbt_new_data'}) %}
     {{ drop_relation_if_exists(new_data_relation) }}
     {% call statement('main') %}
-        {{ get_create_table_as_sql(False, new_data_relation, modified_sql) }}
+        {{ get_create_table_as_sql(False, new_data_relation, sql) }}
     {% endcall %}    
     {% if incremental_strategy == 'full' %}
         {% do clickhouse__proplum_full(existing_relation, new_data_relation) %}
